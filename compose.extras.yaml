@@ -1,0 +1,119 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# =============================================================================
+# CAMADA DE EXTRAS DO EXPERIMENTO — TCC
+# Overhead computacional do processador Isolation Forest no OTel Collector
+# =============================================================================
+#
+# O stub original da release 3.0.0 (so comentarios) esta preservado em
+# experimento/compose.extras.yaml.ORIGINAL-3.0.0.
+#
+# Este arquivo e carregado por ultimo em TODOS os alvos do Makefile e vale
+# IGUALMENTE nos dois cenarios. Tudo que esta aqui e, portanto, FATOR DE
+# CONTROLE — nao introduz delta entre baseline e teste. O unico delta e o
+# conteudo de OTEL_COLLECTOR_CONFIG_EXTRAS, trocado por cenario.sh.
+# -----------------------------------------------------------------------------
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Instrumento de medicao, fora do caminho de tratamento da telemetria.
+  # Raspado DIRETAMENTE pelo Prometheus (ver experimento/configs/
+  # prometheus-config.template.yaml). Nao passa pelo Collector.
+  # ---------------------------------------------------------------------------
+  cadvisor:
+    image: ${CADVISOR_IMAGE}
+    container_name: cadvisor
+    privileged: true
+    restart: unless-stopped
+    command:
+      # Alinhado ao scrape_interval de 5s do job cadvisor: amostrar mais rapido
+      # que o scrape so gastaria CPU sem melhorar a resolucao do dado.
+      - --housekeeping_interval=5s
+      # Sem estas duas flags o cAdvisor emite dezenas de milhares de series
+      # (uma por CPU, por interface, por processo). Com scrape de 5s isso
+      # estoura o limite de memoria do Prometheus no meio da execucao — e uma
+      # execucao interrompida e uma execucao perdida.
+      - --docker_only=true
+      - --disable_metrics=percpu,sched,tcp,udp,advtcp,process,hugetlb,referenced_memory,cpu_topology,resctrl,cpuset,memory_numa
+      - --store_container_labels=false
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    devices:
+      - /dev/kmsg
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  # ---------------------------------------------------------------------------
+  # Collector: sujeito da medicao.
+  # ---------------------------------------------------------------------------
+  otel-collector:
+    deploy:
+      resources:
+        limits:
+          # A 3.0.0 limita o Collector a 400 MB com GOMEMLIMIT=160MiB.
+          # Isso e um teto BAIXO demais para este experimento por dois motivos:
+          #   1. o default de `performance.max_memory_mb` do isolationforest e
+          #      512 MB, ja acima do limite do container;
+          #   2. com o teto apertado, o memory_limiter comecaria a recusar
+          #      dados assim que o Isolation Forest crescesse — e o resultado
+          #      seria um delta de memoria ARTIFICIALMENTE ACHATADO, lido como
+          #      "sem overhead" quando na verdade e saturacao.
+          # Elevado para 1 GB nos DOIS cenarios: a variavel dependente
+          # "memoria residente" precisa de espaco para variar livremente.
+          memory: 1G
+    environment:
+      - GOMEMLIMIT=800MiB
+    depends_on:
+      cadvisor:
+        condition: service_started
+
+  # ---------------------------------------------------------------------------
+  # Prometheus: monta a config do experimento (base 3.0.0 + job do cAdvisor).
+  # ---------------------------------------------------------------------------
+  prometheus:
+    volumes:
+      - ./experimento/configs/prometheus-config.generated.yaml:/etc/prometheus/prometheus-config.yaml
+    deploy:
+      resources:
+        limits:
+          # O limite de 200 MB da 3.0.0 assume so ingestao OTLP a 60s.
+          # Somando o job do cAdvisor a 5s por 30 min, 200 MB nao sustentam a
+          # execucao. Elevado nos DOIS cenarios.
+          memory: 1G
+
+  # ---------------------------------------------------------------------------
+  # Gerador de carga.
+  # ---------------------------------------------------------------------------
+  load-generator:
+    volumes:
+      # Script derivado do upstream por experimento/k6/gerar-script.py, que
+      # troca o executor constant-vus por constant-arrival-rate.
+      #
+      # Com constant-vus a carga e FECHADA: se o Collector saturar no cenario
+      # de teste, a contrapressao chega aos exportadores dos SDKs, os servicos
+      # ficam mais lentos, cada VU itera menos e menos telemetria e gerada.
+      # O overhead medido se auto-atenua. Carga aberta impoe a taxa de chegada
+      # em vez de negocia-la com o sistema sob medicao.
+      - ./experimento/k6/script.js:/home/k6/script.js:ro
+    environment:
+      # A 3.0.0 liga o cenario de browser (Chromium headless) por padrao.
+      # Um Chromium disputando CPU com o Collector na mesma VM de 4 nucleos
+      # injeta ruido de dezenas de pontos percentuais na variavel dependente.
+      # Desligado nos DOIS cenarios.
+      - K6_BROWSER_ENABLED=false
+      # Taxa de chegada imposta, em iteracoes/s. Definida no piloto de
+      # calibracao e mantida fixa como fator de controle a partir dai.
+      - LOAD_GENERATOR_RPS=${LOAD_GENERATOR_RPS}

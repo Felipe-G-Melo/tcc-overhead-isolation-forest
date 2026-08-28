@@ -1,0 +1,62 @@
+# CENARIO: TESTE — Isolation Forest ATIVADO nos pipelines traces, metrics e logs
+#
+# Carregado por ultimo na cadeia de --config do Collector:
+#   otelcol-config.yml -> -full.yml -> -observability.yml -> ESTE ARQUIVO
+#
+# ATENCAO — o Collector faz merge de mapas mas SUBSTITUI arrays.
+# As listas de `processors` abaixo repetem integralmente as da release 3.0.0 e
+# apenas acrescentam `isolationforest` ao final. Omitir qualquer nome faria o
+# cenario de TESTE rodar sem memory_limiter ou sem as transformacoes,
+# invalidando a comparacao.
+#
+# Nao redefinimos `receivers` nem `exporters` em nenhum pipeline: essas listas
+# vem de -full.yml e -observability.yml e seriam sobrescritas se citadas aqui.
+# -----------------------------------------------------------------------------
+
+processors:
+  isolationforest:
+    # --- hiperparametros mantidos no default do componente (fatores de controle)
+    forest_size: 100          # default; maximo aceito pelo componente e 1000
+    subsample_size: 256       # default
+    contamination_rate: 0.1   # default
+    threshold: 0.7            # default
+    min_samples: 1000         # default
+
+    # --- modo de operacao
+    # `enrich` grava os atributos de score/classificacao no proprio dado, em vez
+    # de emitir uma metrica nova. Isola o custo do algoritmo do custo de inflar
+    # o volume exportado.
+    mode: enrich
+
+    # --- janela e frequencia de retreino (UNICO desvio dos defaults)
+    # Defaults (training_window: 24h / update_frequency: 1h) dariam ZERO
+    # retreinos numa execucao de 30 min: o modelo treinaria uma vez na largada e
+    # nunca mais, capturando so o custo de scoring. Com 10m/5m ocorrem ~5
+    # retreinos dentro da janela medida, que e a parte cara do algoritmo.
+    training_window: 10m
+    update_frequency: 5m
+
+    performance:
+      # O default do componente e 512 MB. O container otel-collector da 3.0.0
+      # tem limite de 400 MB e GOMEMLIMIT=160MiB — o default estouraria o
+      # container. compose.extras.yaml eleva o limite do container para 1 GB
+      # (identico nos dois cenarios) e aqui o orcamento fica em 256 MB.
+      max_memory_mb: 256
+      batch_size: 1000        # default
+      parallel_workers: 4     # default
+
+    # `features` fica no default do componente. O schema real e um mapa
+    # {traces: [], metrics: [], logs: []} — nao uma lista plana, como diz o
+    # README upstream. Nomes de feature invalidos sao rejeitados na subida;
+    # cenario.sh roda `otelcol validate` antes de subir justamente por isso.
+
+service:
+  pipelines:
+    traces:
+      processors: [resourcedetection, memory_limiter, transform/sanitize_spans, gen_ai_normalizer, isolationforest]
+    metrics:
+      processors: [resourcedetection, memory_limiter, isolationforest]
+    logs:
+      processors: [resourcedetection, memory_limiter, transform/sanitize_logs, isolationforest]
+    # O pipeline `profiles` NAO recebe o processador: o isolationforest declara
+    # estabilidade apenas para traces, metrics e logs.

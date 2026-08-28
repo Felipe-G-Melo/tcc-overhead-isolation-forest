@@ -1,0 +1,16 @@
+# Gerados pelo cenario.sh a cada subida — nao versionar.
+experimento/configs/prometheus-config.generated.yaml
+experimento/k6/script.js
+.env.override
+
+# Resultados das execucoes (registros .env e CSV exportados).
+# Descomente se quiser versionar os dados junto com o codigo.
+experimento/execucoes/
+
+# Copias de seguranca criadas no passo 1.2, dentro da release.
+*.ORIGINAL-3.0.0
+
+# A release do OpenTelemetry Demo nao entra no repositorio: e baixada do
+# upstream no passo 1.1. Ver README, Parte 1.
+opentelemetry-demo-3.0.0/
+opentelemetry-demo-3.0.0.zip

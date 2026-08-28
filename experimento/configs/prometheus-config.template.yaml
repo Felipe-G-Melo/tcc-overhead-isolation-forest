@@ -1,0 +1,87 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+
+global:
+  # Align Prometheus scrape interval with the OTel SDKs' export interval for consistency (see OTEL_METRIC_EXPORT_INTERVAL)
+  scrape_interval: 60s
+
+otlp:
+  keep_identifying_resource_attributes: true
+  promote_resource_attributes:
+    - service.instance.id
+    - service.name
+    - service.namespace
+    - service.version
+    - service.criticality
+    - cloud.availability_zone
+    - cloud.region
+    - deployment.environment.name
+
+    # When deploying on Kubernetes, resource attributes used to identify the
+    # kubernetes resources in dashboards and alerts.
+    - k8s.cluster.name
+    - k8s.container.name
+    - k8s.cronjob.name
+    - k8s.daemonset.name
+    - k8s.deployment.name
+    - k8s.job.name
+    - k8s.namespace.name
+    - k8s.node.name
+    - k8s.pod.name
+    - k8s.replicaset.name
+    - k8s.statefulset.name
+    - container.name
+
+    # When deploying on VMs, resource attributes used to identify
+    # the host in dashboards and alerts.
+    - host.name
+
+    # PostgreSQL resource attributes produced by the OTel Collector PostgreSQL receiver
+    # and used in dashboards and alerts.
+    # See https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/receiver/postgresqlreceiver/metadata.yaml
+    - postgresql.database.name
+    - postgresql.schema.name
+    - postgresql.table.name
+    - postgresql.index.name
+
+    # Kafka resource attributes produced by the OTel Collector Kafka receiver
+    # https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/receiver/kafkametricsreceiver
+    - kafka.cluster.alias
+
+    # See https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/v0.142.0/connector/spanmetricsconnector/README.md#known-limitation-the-single-writer-principle
+    - collector.instance.id
+storage:
+  tsdb:
+    out_of_order_time_window: 30m
+
+# =============================================================================
+# ADICAO DO EXPERIMENTO — raspagem direta do cAdvisor
+# =============================================================================
+# A configuracao acima e copia verbatim de src/prometheus/prometheus-config.yaml
+# da release 3.0.0, que NAO possui nenhum bloco `scrape_configs`: o Prometheus
+# do demo recebe tudo por OTLP push, vindo do proprio Collector.
+#
+# Ai esta a circularidade que este bloco resolve. Medir o Collector pelo
+# receiver docker_stats significaria fazer o instrumento passar por dentro do
+# sistema medido — e, pior, se o Collector saturar no cenario de TESTE, a
+# coleta atrasa ou e descartada exatamente nos picos em que o dado importa.
+#
+# O cAdvisor roda em container separado e e raspado DIRETAMENTE pelo
+# Prometheus, fora do caminho de tratamento. O receiver docker_stats continua
+# ligado nos dois cenarios como fator de controle (gera carga igual dos dois
+# lados), mas nao e a fonte de medicao.
+scrape_configs:
+  - job_name: cadvisor
+    # O `scrape_interval` global e 60s — alinhado ao intervalo de export dos
+    # SDKs. Para a medicao isso e grosso demais: 30 min renderiam ~30 amostras
+    # por serie e `rate(...[1m])` nao teria dois pontos dentro da janela.
+    # 5s da ~360 amostras por serie na janela medida.
+    scrape_interval: 5s
+    scrape_timeout: 4s
+    static_configs:
+      - targets: ['cadvisor:8080']
+        labels:
+          # cenario.sh substitui __CENARIO__ ao gerar prometheus-config.generated.yaml.
+          # O Prometheus NAO expande variaveis de ambiente em static_configs, por isso
+          # a substituicao e feita na geracao do arquivo, e nao em runtime.
+          cenario: '__CENARIO__'
