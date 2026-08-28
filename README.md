@@ -110,7 +110,7 @@ Os dois ficam **lado a lado**, na mesma pasta de trabalho:
 mkdir -p ~/tcc && cd ~/tcc
 
 # 1. este repositório
-git clone https://github.com/<seu-usuario>/tcc-overhead-isolation-forest.git
+git clone https://github.com/Felipe-G-Melo/tcc-overhead-isolation-forest.git
 
 # 2. a release 3.0.0 oficial do OpenTelemetry Demo
 curl -L -o opentelemetry-demo-3.0.0.zip \
