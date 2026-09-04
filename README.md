@@ -50,7 +50,8 @@ sua máquina. Cada escolha não-óbvia está justificada no ponto em que aparece
 
 ### Custo
 
-`c6i.2xlarge` on-demand: **US$ 0,34/h**.
+`m6i.xlarge` on-demand (us-east-1): **US$ 0,19/h**. São 4 vCPU — cabe na cota
+padrão de conta nova; `c6i.2xlarge` (8 vCPU) exigiria pedido de aumento de cota.
 
 | Etapa | Tempo |
 |---|---|
@@ -59,10 +60,16 @@ sua máquina. Cada escolha não-óbvia está justificada no ponto em que aparece
 | Piloto de calibração | ~1 h 30 |
 | 6 execuções (3 por cenário × ~50 min) | ~5 h |
 | Folga para re-execuções | ~2 h |
-| **Total** | **~10 h ≈ US$ 3,40** |
+| **Total** | **~10 h ≈ US$ 1,90** |
 
 > **Pare a instância entre as sessões.** O EBS continua cobrando ~US$ 8/mês
 > pelos 100 GB (irrelevante); a instância ligada, não.
+
+> **Por que `m6i.xlarge` e não `c6i.xlarge`.** Mesma cota de 4 vCPU, mesma
+> topologia de núcleos, ~US$ 0,02/h a mais — e 16 GB no lugar de 8. A stack
+> completa do demo mais o OpenSearch sob carga passa perto do teto de 8 GB; os
+> 16 GB dão folga e evitam que um OOM (`docker ps` → `Exited (137)`) contamine
+> uma execução. `c6i.xlarge` também roda, mas só compensa para poupar centavos.
 
 ---
 
@@ -112,9 +119,13 @@ mkdir -p ~/tcc && cd ~/tcc
 # 1. este repositório
 git clone https://github.com/Felipe-G-Melo/tcc-overhead-isolation-forest.git
 
-# 2. a release 3.0.0 oficial do OpenTelemetry Demo
-curl -L -o opentelemetry-demo-3.0.0.zip \
-  https://github.com/open-telemetry/opentelemetry-demo/archive/refs/tags/v3.0.0.zip
+# 2. a release 3.0.0 oficial do OpenTelemetry Demo.
+#    A tag do upstream e "3.0.0", SEM o "v" ("v3.0.0" da 404). O -f faz o
+#    curl sair com erro no 404 em vez de salvar a pagina "404: Not Found"
+#    como se fosse o zip — o que depois quebra o unzip com uma mensagem
+#    enganosa ("End-of-central-directory signature not found").
+curl -fL -o opentelemetry-demo-3.0.0.zip \
+  https://github.com/open-telemetry/opentelemetry-demo/archive/refs/tags/3.0.0.zip
 unzip opentelemetry-demo-3.0.0.zip
 ```
 
@@ -155,7 +166,7 @@ exatamente as descritas — `diff .env.ORIGINAL-3.0.0 .env`.
 **2.** No bloco `# Dependent images`, logo antes de `FIREPIT_IMAGE` — pinar o cAdvisor:
 
 ```diff
-+CADVISOR_IMAGE=gcr.io/cadvisor/cadvisor:v0.53.0
++CADVISOR_IMAGE=gcr.io/cadvisor/cadvisor:v0.54.1
  FIREPIT_IMAGE=ghcr.io/florianl/firepit:v0.1.0
 ```
 
@@ -170,7 +181,7 @@ a taxa de chegada:
 +
 +# Taxa de chegada imposta ao k6, em iteracoes/s (executor constant-arrival-rate).
 +# Definir no piloto de calibracao.
-+LOAD_GENERATOR_RPS=50
++LOAD_GENERATOR_RPS=15
  K6_TARGET_URL=http://${FRONTEND_PROXY_ADDR}
 ```
 
@@ -179,7 +190,10 @@ a taxa de chegada:
 - **(1)** `latest` são tags mutáveis. Baseline e teste poderiam rodar binários
   diferentes, silenciosamente, e o experimento perderia o sentido sem dar sinal.
 - **(2)** O cAdvisor é o instrumento de medição. Tag móvel no instrumento é o
-  mesmo problema, um nível acima.
+  mesmo problema, um nível acima. Use `v0.54.1`: a `v0.53.0` nunca foi publicada
+  em `gcr.io/cadvisor/cadvisor` (as tags pulam de `v0.52.1` para `v0.54.1`), e
+  uma tag inexistente aqui aborta o pull de **todas** as imagens em cascata —
+  o erro real, `... : not found`, vem afogado em dezenas de `No such image`.
 - **(3)** O executor `constant-arrival-rate` lê `LOAD_GENERATOR_RPS`. O nome
   não pode começar com `K6_` — o k6 consome essas variáveis como opções
   próprias, e `K6_RPS` é um limitador global de taxa que colidiria com o executor.
@@ -211,11 +225,11 @@ experimento/configs/prometheus-config.template.yaml
 ```
 
 Integridade dos arquivos **operativos** — os que afetam o resultado da medição
-(primeiros 16 caracteres do SHA-256, estado de 22/08/2026):
+(primeiros 16 caracteres do SHA-256, estado de 01/09/2026):
 
 ```
 93d4bd0b599d4fd3  cenario.sh
-09d7ca4b354b525e  compose.extras.yaml
+9786ccb4fa9bb575  compose.extras.yaml
 605bf3ef1cd6d4a4  experimento/coletar.sh
 39a324ce40c707d8  experimento/k6/gerar-script.py
 7179da677d4e32c0  experimento/configs/otelcol-config-extras.BASELINE.yml
@@ -361,7 +375,14 @@ Tudo em `us-east-1`. O tráfego é 100% interno à VM, então a região só afet
 Pelo AWS CLI, e não pelo console: os parâmetros abaixo são citáveis no texto e
 reproduzíveis por quem ler o trabalho.
 
+> **Desligue o pager do AWS CLI antes de tudo.** Por padrão o AWS CLI joga
+> qualquer saída longa no `less`. Sair dele com `Ctrl+C` deixa o terminal com o
+> *echo* desligado — você digita e nada aparece. `export AWS_PAGER=""` resolve na
+> raiz. Se já caiu nisso, digite `stty sane` às cegas e Enter. Ponha a linha no
+> `~/.bashrc` para valer em toda sessão.
+
 ```bash
+export AWS_PAGER=""
 export AWS_REGION=us-east-1
 
 # SSH restrito ao seu IP atual. Se sua conexão trocar de IP, refaça esta regra.
@@ -387,8 +408,8 @@ AMI_ID=$(aws ssm get-parameters \
 
 ID=$(aws ec2 run-instances \
   --image-id "$AMI_ID" \
-  --instance-type c6i.2xlarge \
-  --cpu-options CoreCount=4,ThreadsPerCore=1 \
+  --instance-type m6i.xlarge \
+  --cpu-options CoreCount=2,ThreadsPerCore=1 \
   --key-name tcc-overhead \
   --security-group-ids "$SG_ID" \
   --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":100,"VolumeType":"gp3","DeleteOnTermination":true}}]' \
@@ -405,6 +426,10 @@ echo "IP: $IP"
 > **`--cpu-options` só vale no lançamento.** Não há como desligar o SMT depois.
 > Se errar, é preciso terminar a instância e lançar outra.
 
+`CoreCount=2,ThreadsPerCore=1` entrega **2 núcleos físicos dedicados**, sem
+irmão SMT disputando o mesmo core — a contabilidade de CPU-segundos por
+container do cAdvisor fica limpa, que é o que a medição exige.
+
 **Conferir que o SMT está mesmo desligado:**
 
 ```bash
@@ -412,8 +437,8 @@ ssh -i ~/.ssh/tcc-overhead.pem ubuntu@"$IP"
 lscpu | grep -E 'CPU\(s\)|Thread|Core|Model name'
 ```
 
-Esperado: `CPU(s): 4`, `Thread(s) per core: 1`, `Core(s) per socket: 4`.
-Se aparecerem 8 vCPUs, o `--cpu-options` não pegou — relance a instância.
+Esperado: `CPU(s): 2`, `Thread(s) per core: 1`, `Core(s) per socket: 2`.
+Se aparecerem 4 vCPUs, o `--cpu-options` não pegou — relance a instância.
 
 ---
 
@@ -518,7 +543,7 @@ produz `bad interpreter` — erro que não parece o que é.
 Depois, carga baixa. O objetivo aqui é provar que a máquina funciona, **não** medir:
 
 ```bash
-RPS=20 VUS=30 ./cenario.sh teste
+RPS=15 VUS=30 ./cenario.sh teste
 ```
 
 O primeiro `up` puxa ~20 imagens. Enquanto baixa, abra um segundo terminal com
@@ -590,8 +615,15 @@ Espere ~12 min e observe as duas séries. O host primeiro:
 
 ```bash
 curl -sG http://localhost:9090/api/v1/query --data-urlencode \
-  'query=sum(rate(container_cpu_usage_seconds_total{id="/"}[1m])) / machine_cpu_cores'
+  'query=sum(rate(container_cpu_usage_seconds_total{id="/"}[1m])) / scalar(machine_cpu_cores)'
 ```
+
+O `scalar(...)` no denominador não é cosmético: o cAdvisor v0.54.1 anexa
+`boot_id`, `machine_id` e `system_uuid` às métricas `machine_*`, então
+`machine_cpu_cores` é um vetor com labels. `sum(rate(...))` é um vetor **sem**
+labels — e a divisão vetor-a-vetor do PromQL só casa séries de labels idênticos,
+devolvendo `result: []` sem erro. `scalar()` reduz o denominador a um número e o
+casamento deixa de existir.
 
 E o Collector:
 
@@ -697,7 +729,7 @@ RPS=<n> VUS=<n> ./cenario.sh teste       # sobe o cenário teste
 
 ## Armadilhas conhecidas
 
-As cinco primeiras são do próprio demo; as três últimas são de ambiente.
+As seis primeiras são do próprio demo; as quatro últimas são de ambiente.
 
 | # | Armadilha | Como se manifesta |
 |---|---|---|
@@ -706,11 +738,13 @@ As cinco primeiras são do próprio demo; as três últimas são de ambiente.
 | 3 | `scrape_interval` global de 60 s | `rate(...[1m])` volta vazio ou serrilhado |
 | 4 | Collector limitado a 400 MB, contra `max_memory_mb: 512` | Delta de memória achatado, lido como "sem overhead" |
 | 5 | Chromium headless ligado por padrão | Ruído de dezenas de pontos percentuais na CPU |
-| 6 | `Path.read_text(newline=)` só existe no Python 3.13+ | `TypeError` no gerador do k6. Ubuntu 24.04 traz 3.12 |
-| 7 | Git Bash reescreve `/etc/...` para `C:/Program Files/Git/etc/...` | `unable to read the file` na validação. Só no Windows |
-| 8 | CRLF no shebang de scripts vindos do Windows | `bad interpreter` — erro que não parece o que é |
+| 6 | Healthcheck do OpenSearch curto para a 1ª subida (`start_period` 10 s + 10×5 s) | `dependency failed to start: container opensearch is unhealthy` — a stack inteira não sobe. `compose.extras.yaml` afrouxa para `start_period` 120 s / `retries` 20 |
+| 7 | `Path.read_text(newline=)` só existe no Python 3.13+ | `TypeError` no gerador do k6. Ubuntu 24.04 traz 3.12 |
+| 8 | Git Bash reescreve `/etc/...` para `C:/Program Files/Git/etc/...` | `unable to read the file` na validação. Só no Windows |
+| 9 | CRLF no shebang de scripts vindos do Windows | `bad interpreter` — erro que não parece o que é |
+| 10 | Pager do AWS CLI, saída longa no `less` + `Ctrl+C` | Terminal para de mostrar o que você digita (echo desligado). `export AWS_PAGER=""` previne; `stty sane` conserta |
 
-A de nº 1 é a mais perigosa das oito, porque é a única que **não produz
+A de nº 1 é a mais perigosa das dez, porque é a única que **não produz
 sintoma**: o experimento roda até o fim, gera números, e os números estão
 errados na direção de subestimar o efeito medido.
 
@@ -729,7 +763,8 @@ espelham exatamente onde cada arquivo entra na release.
 ├── .gitignore                   ignora os derivados e a release baixada
 ├── cenario.sh                   sobe um cenário          → raiz da release
 ├── compose.extras.yaml          cAdvisor, limites de     → raiz da release
-│                                memória, k6 sem browser
+│                                memória, k6 sem browser,
+│                                healthcheck do OpenSearch
 └── experimento/                                          → experimento/
     ├── coletar.sh               exporta a janela medida do Prometheus
     ├── configs/
@@ -743,7 +778,7 @@ espelham exatamente onde cada arquivo entra na release.
 | Arquivo | Papel |
 |---|---|
 | `cenario.sh` | Sobe, valida ou derruba um cenário. Gera os arquivos derivados |
-| `compose.extras.yaml` | Overlay idêntico nos dois cenários: cAdvisor, limites de memória do Collector (1 GB) e do Prometheus (1 GB), `K6_BROWSER_ENABLED=false` |
+| `compose.extras.yaml` | Overlay idêntico nos dois cenários: cAdvisor, limites de memória do Collector (1 GB) e do Prometheus (1 GB), `K6_BROWSER_ENABLED=false`, healthcheck do OpenSearch afrouxado (`start_period` 120 s / `retries` 20) para a 1ª subida |
 | `configs/otelcol-config-extras.BASELINE.yml` | Só comentários — Collector upstream intocado |
 | `configs/otelcol-config-extras.TESTE.yml` | `isolationforest` nos 3 pipelines. **Único delta entre os cenários** |
 | `configs/prometheus-config.template.yaml` | Config do Prometheus + job do cAdvisor, com `__CENARIO__` |

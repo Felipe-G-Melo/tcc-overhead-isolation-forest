@@ -90,9 +90,12 @@ services:
       resources:
         limits:
           # O limite de 200 MB da 3.0.0 assume so ingestao OTLP a 60s.
-          # Somando o job do cAdvisor a 5s por 30 min, 200 MB nao sustentam a
-          # execucao. Elevado nos DOIS cenarios.
-          memory: 1G
+          # Somando o job do cAdvisor a 5s por 30 min, as series do span_metrics
+          # e o replay do WAL na subida, 1 GB e insuficiente: o Prometheus e
+          # morto no meio do replay e entra em loop de restart. Elevado para
+          # 3 GB nos DOIS cenarios. O Prometheus e instrumento, nao o objeto
+          # medido — este teto nao introduz delta entre baseline e teste.
+          memory: 3G
 
   # ---------------------------------------------------------------------------
   # Gerador de carga.
