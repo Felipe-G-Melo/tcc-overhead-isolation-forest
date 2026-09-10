@@ -165,7 +165,7 @@ REGISTRO="experimento/execucoes/${CENARIO}-$(date -u -d "@${INICIO_EPOCH}" +%Y%m
   echo "MEDICAO_FIM_EPOCH=$((INICIO_EPOCH + 600 + 1800))"
   echo "EXTRAS=${EXTRAS}"
   echo "VUS=$(python3 -c "import json;c=json.load(open('src/flagd/demo.flagd.json'))['flags']['loadGeneratorVUs'];print(c['variants'][c['defaultVariant']])")"
-  echo "RPS=$(grep -h '^LOAD_GENERATOR_RPS=' .env.override .env | tail -1 | cut -d= -f2)"
+  echo "RPS=$(grep -h '^LOAD_GENERATOR_RPS=' .env.override .env | head -1 | cut -d= -f2)"
   # Steal time acumulado do host no inicio da execucao. A diferenca contra a
   # leitura final e a evidencia de que a VM compartilhada nao contaminou a
   # medicao (secao "Limitacoes" do TCC).

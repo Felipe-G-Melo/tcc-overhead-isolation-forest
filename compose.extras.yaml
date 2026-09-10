@@ -92,10 +92,19 @@ services:
           # O limite de 200 MB da 3.0.0 assume so ingestao OTLP a 60s.
           # Somando o job do cAdvisor a 5s por 30 min, as series do span_metrics
           # e o replay do WAL na subida, 1 GB e insuficiente: o Prometheus e
-          # morto no meio do replay e entra em loop de restart. Elevado para
-          # 3 GB nos DOIS cenarios. O Prometheus e instrumento, nao o objeto
-          # medido — este teto nao introduz delta entre baseline e teste.
-          memory: 3G
+          # morto no meio do replay e entra em loop de restart.
+          #
+          # 3 GB tambem se mostrou insuficiente em execucao real: sob o cenario
+          # 'teste' (RPS calibrado + scrape do cAdvisor a 5s por 40 min), somado
+          # as duas query_range pesadas do coletar.sh no fim da janela, o
+          # Prometheus estourou os 3 GB e entrou no mesmo loop — GOMEMLIMIT
+          # (90% do teto do cgroup, log do proprio Prometheus) confirmou o teto
+          # de 3 GiB no momento da falha, mesmo com o host tendo memoria livre
+          # de sobra (o OOM e por cgroup, nao por pressao do host).
+          # Elevado para 6 GB nos DOIS cenarios. O Prometheus e instrumento,
+          # nao o objeto medido — este teto nao introduz delta entre baseline
+          # e teste.
+          memory: 6G
 
   # ---------------------------------------------------------------------------
   # Gerador de carga.
