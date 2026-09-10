@@ -146,6 +146,25 @@ if [[ "$SOMENTE_VALIDAR" -eq 1 ]]; then
   exit 0
 fi
 
+# Le LOAD_GENERATOR_RPS de dentro do container do k6. O `up -d` so retorna
+# depois de criar o load-generator (ele depende do frontend saudavel), mas a
+# espera curta cobre o caso de o daemon ainda estar registrando o container.
+rps_do_container() {
+  local tentativa
+  for tentativa in 1 2 3 4 5; do
+    local v
+    v=$(docker inspect load-generator \
+          --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
+        | sed -n 's/^LOAD_GENERATOR_RPS=//p' | head -1)
+    if [[ -n "$v" ]]; then
+      echo "$v"
+      return 0
+    fi
+    sleep 2
+  done
+  echo "INDISPONIVEL"
+}
+
 # -----------------------------------------------------------------------------
 # 6. Sobe o ambiente e registra a marca de tempo.
 #
@@ -166,11 +185,32 @@ REGISTRO="experimento/execucoes/${CENARIO}-$(date -u -d "@${INICIO_EPOCH}" +%Y%m
   echo "EXTRAS=${EXTRAS}"
   echo "VUS=$(python3 -c "import json;c=json.load(open('src/flagd/demo.flagd.json'))['flags']['loadGeneratorVUs'];print(c['variants'][c['defaultVariant']])")"
   echo "RPS=$(grep -h '^LOAD_GENERATOR_RPS=' .env.override .env | head -1 | cut -d= -f2)"
+  # RPS EFETIVO: lido do container, nao do arquivo.
+  #
+  # Por que os dois. A linha acima re-le a mesma fonte que o compose leu, entao
+  # ela registra a INTENCAO. Se por qualquer motivo o container subir com outro
+  # valor, o registro nao denuncia — foi exatamente o que aconteceu na sessao de
+  # 07/09/2026, em que os seis registros sairam com 15 sem que se possa hoje
+  # saber qual taxa rodou de fato. Config.Env e o ambiente que o compose
+  # entregou ao processo: essa e a evidencia.
+  echo "RPS_EFETIVO=$(rps_do_container)"
   # Steal time acumulado do host no inicio da execucao. A diferenca contra a
   # leitura final e a evidencia de que a VM compartilhada nao contaminou a
   # medicao (secao "Limitacoes" do TCC).
   echo "STEAL_INICIO=$(awk '/^cpu /{print $9}' /proc/stat)"
 } > "$REGISTRO"
+
+# Divergencia entre a intencao e o que o container recebeu: aborta a execucao em
+# vez de deixar 40 minutos de medicao saírem com a carga errada.
+RPS_ARQUIVO=$(grep -h '^LOAD_GENERATOR_RPS=' .env.override .env | head -1 | cut -d= -f2)
+RPS_CONTAINER=$(grep '^RPS_EFETIVO=' "$REGISTRO" | cut -d= -f2)
+if [[ "$RPS_ARQUIVO" != "$RPS_CONTAINER" ]]; then
+  echo >&2
+  echo "ERRO: RPS divergente. Arquivo=${RPS_ARQUIVO}  container=${RPS_CONTAINER}" >&2
+  echo "      A carga imposta nao e a que voce pediu. Derrube com" >&2
+  echo "      ./cenario.sh parar, corrija e suba de novo." >&2
+  exit 1
+fi
 
 echo
 echo "=============================================================="

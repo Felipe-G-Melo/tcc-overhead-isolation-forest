@@ -9,10 +9,10 @@ Faculdade Presbiteriana Gammon, Lavras-MG
 
 **RESUMO**
 
-**Introdução**: Este modelo está redigido, exatamente, em formato indicado para os resumos simples. Leia atentamente as instruções e formate seu trabalho de acordo com este padrão. **Objetivos:** A intenção deste modelo é esclarecer aos autores o formato correto a ser utilizado nos resumos simples. **Metodologia:** Basta copiar e colar os textos do seu trabalho original diretamente em uma cópia deste documento. O resumo deve ser encaminhado em formato DOC, respeitando as formatações: Fonte Times New Roman, tamanho 12, espaçamento simples entre linhas, justificado, limitado a 500 palavras e uma página. Papel tamanho A4, margens superior, inferior, esquerda e direta em 2 cm. **Resultados/Discussão:** Respeite os prazos e normas de submissão de trabalhos. **Conclusão:** Os trabalhos serão inseridos nos Anais da forma como foram submetidos ao evento, não sendo realizada nenhuma revisão de texto. Desse modo, eventuais erros de editoração nos resumos serão de inteira responsabilidade dos autores.
+**Introdução**: A adoção de arquiteturas de microsserviços amplia o volume de telemetria gerado e torna a observabilidade indispensável à operação. Nesse contexto, técnicas não supervisionadas como o *Isolation Forest* passam a ser incorporadas à *pipeline* de observabilidade para detectar anomalias automaticamente — processamento adicional que consome recursos e que, em nuvem, é faturado por uso. **Objetivos**: Analisar o impacto computacional da ativação do processador *Isolation Forest* no *OpenTelemetry Collector*, medindo o consumo de CPU e de memória sob carga realista. **Metodologia**: Pesquisa experimental e quantitativa comparando dois cenários — o *Collector* sem e com o componente `isolationforest` do *opentelemetry-collector-contrib* 0.157.0, habilitado nos *pipelines* de *traces*, métricas e *logs* — sobre o *OpenTelemetry Demo* 3.0.0, em instância AWS `m6i.xlarge` com dois núcleos físicos dedicados. A carga foi imposta pelo k6 com executor `constant-arrival-rate` a 47 iterações por segundo. Foram realizadas três execuções por cenário, alternadas, de 40 minutos cada, descartados os 10 minutos iniciais. A medição empregou o cAdvisor, externo à *pipeline* avaliada, raspado pelo Prometheus a cada 5 segundos. **Resultados/Discussão**: O consumo de CPU do *Collector* subiu de 6,97% para 56,08% de um núcleo — acréscimo de 49,11 pontos percentuais, cerca de oito vezes o valor de referência —, com intervalos de confiança de 95% sem sobreposição; o percentil 99 passou de 7,33% para 71,29%. A mediana de memória residente subiu de 93,18 MB para 120,22 MB (29%), enquanto média e percentil 99 do cenário de teste ficaram dominados por uma execução em que o consumo cresceu até 756,7 MB, comportamento não reproduzido nas demais. O custo observado é de ordem de grandeza superior ao relatado na literatura para instrumentação com *tracing* distribuído, diferença explicada pela natureza da operação: executar um algoritmo de aprendizado sobre todo o fluxo processado, e não apenas coletá-lo. **Conclusão**: O *overhead* não inviabiliza a adoção em termos absolutos, pois 56% de um núcleo correspondem a cerca de 28% da capacidade do hospedeiro, mas octuplica o custo de operar o *Collector*, o que torna a decisão de manter a detecção de anomalias na *pipeline* economicamente relevante em ambientes cobrados por uso.
 
-**Palavras-chave**: Número máximo de 3 palavras; Digitadas em sequência; Separadas por ponto e vírgula.   
-***Keywords**: Número máximo de 3 palavras (consultar a lista de descritores apropriados para cada área); Digitadas em sequência; Separadas por ponto e vírgula.*
+**Palavras-chave**: Observabilidade; Isolation Forest; Overhead computacional.  
+***Keywords**: Observability; Isolation Forest; Computational overhead.*
 
 **1\. INTRODUÇÃO**  
 	A adoção de arquiteturas de software baseadas em microsserviços tem transformado o desenvolvimento de sistemas de média e alta complexidade, ao propor a construção de aplicações como um conjunto de serviços pequenos, independentes e implantáveis de forma autônoma. Entre as principais vantagens atribuídas aos microsserviços, destacam-se a maior agilidade no desenvolvimento, a melhor escalabilidade e a maior autonomia entre equipes e componentes do sistema. (Fowler; Lewis, 2014).  
@@ -20,8 +20,8 @@ Faculdade Presbiteriana Gammon, Lavras-MG
 
  A grande e dispersa quantidade de dados de telemetria gerados pelas interações constantes entre dezenas ou centenas de microsserviços torna o rastreamento de falhas e a compreensão do comportamento global do sistema uma tarefa altamente complexa. (Jangala, 2015).  
 	Diante desse cenário, torna-se cada vez mais essencial o desenvolvimento de estratégias avançadas de observabilidade, com o objetivo de detectar precocemente problemas que possam surgir em sistemas distribuídos. (Duggirala; Kumar, 2025). Nesse contexto, o uso de técnicas de inteligência artificial, como o algoritmo *Isolation Forest,* apresenta-se como uma alternativa promissora para a detecção de anomalias, uma vez que se trata de um método não supervisionado, escalável e adequado à análise de grandes volumes de dados. Todavia, sua incorporação à *pipeline* de observabilidade, especialmente em arquiteturas baseadas em OpenTelemetry, exige processamento adicional para analisar continuamente métricas, *logs* e *traces*, calcular escores de anomalia e manter modelos atualizados com base em janelas recentes de dados. Esse processamento extra pode introduzir *overhead* computacional e ampliar o consumo de recursos de infraestrutura, aspecto particularmente relevante em ambientes de microsserviços executados em nuvens públicas, nos quais predomina o modelo de provisão *pay-as-you-go* e os custos operacionais variam conforme o uso dos serviços. (Armbrust et al., 2009).  
-	A presente pesquisa surge da necessidade de compreender o impacto dessa integração. Diante disso, levanta-se a seguinte questão central: o *overhead* computacional — especificamente o *Isolation Forest* consumo de CPU, memória e o aumento de latência — gerado pelo processador compromete a sua viabilidade de adoção em ambientes de produção de microsserviços de médio porte sob carga realista?  
-	Para responder a essa indagação, o objetivo geral desta pesquisa é analisar o impacto computacional da ativação do processador *Isolation Forest* no *OpenTelemetry Collector* durante o processamento de telemetria de um sistema distribuído. Para viabilizar esse propósito, definem-se como objetivos específicos: configurar e instrumentar a aplicação de referência *OpenTelemetry Demo*; executar testes de carga controlados, comparando cenários com e sem a atuação do processador de anomalias; e medir sistematicamente as métricas de desempenho do *Collector*, incluindo uso de CPU, memória RAM e latência de processamento.
+	A presente pesquisa surge da necessidade de compreender o impacto dessa integração. Diante disso, levanta-se a seguinte questão central: o *overhead* computacional gerado pelo processador *Isolation Forest* — especificamente o consumo de CPU e de memória — compromete a sua viabilidade de adoção em ambientes de produção de microsserviços de médio porte sob carga realista?  
+	Para responder a essa indagação, o objetivo geral desta pesquisa é analisar o impacto computacional da ativação do processador *Isolation Forest* no *OpenTelemetry Collector* durante o processamento de telemetria de um sistema distribuído. Para viabilizar esse propósito, definem-se como objetivos específicos: configurar e instrumentar a aplicação de referência *OpenTelemetry Demo*; executar testes de carga controlados, comparando cenários com e sem a atuação do processador de anomalias; e medir sistematicamente as métricas de desempenho do *Collector*, especificamente o uso de CPU e de memória RAM.
 
 **2\. REFERENCIAL TEÓRICO**
 
@@ -54,104 +54,108 @@ Liu, Ting e Zhou (2008, 2012\) propõem o *Isolation Forest* com base na ideia d
 
 ## **2.4 Desempenho Computacional e *Overhead***
 
-O termo *overhead*, em sistemas distribuídos, designa o custo adicional de recursos computacionais e de tempo de execução introduzido por mecanismos de monitoramento, observabilidade e demais serviços de infraestrutura que não fazem parte direta da lógica de negócio da aplicação (Oliveira, 2020; Anders, 2024). Em termos práticos, a instrumentação com distributed *tracing* pode adicionar consumo extra de CPU, memória e rede, além de aumentar a latência de ponta a ponta, especialmente quando os dados de rastreio precisam ser serializados e exportados para *backends* externos (Anders, 2024; Google Research, 2010).  
-	Estudos empíricos mostram que o *tracing* distribuído pode reduzir o *throughput* de microsserviços em faixas relevantes e elevar a latência, dependendo da configuração, do ambiente de execução e da ferramenta utilizada (Anders, 2024; Pérez et al., 2025). Em ambientes de grande escala, como o Dapper do Google, o uso de *sampling* e a limitação da instrumentação a bibliotecas essenciais foram estratégias importantes para manter o *overhead* em níveis baixos sem comprometer a capacidade de diagnóstico (Singelman, 2010).
+O termo *overhead*, em sistemas distribuídos, designa o custo adicional de recursos computacionais e de tempo de execução introduzido por mecanismos de monitoramento, observabilidade e demais serviços de infraestrutura que não fazem parte direta da lógica de negócio da aplicação (Oliveira, 2020; Anders, 2024). Em termos práticos, a instrumentação com distributed *tracing* pode adicionar consumo extra de CPU, memória e rede, além de aumentar a latência de ponta a ponta, especialmente quando os dados de rastreio precisam ser serializados e exportados para *backends* externos (Anders, 2024; Sigelman et al., 2010).  
+	Estudos empíricos mostram que o *tracing* distribuído pode reduzir o *throughput* de microsserviços em faixas relevantes e elevar a latência, dependendo da configuração, do ambiente de execução e da ferramenta utilizada (Anders, 2024; Pérez et al., 2025). Em ambientes de grande escala, como o Dapper do Google, o uso de *sampling* e a limitação da instrumentação a bibliotecas essenciais foram estratégias importantes para manter o *overhead* em níveis baixos sem comprometer a capacidade de diagnóstico (Sigelman et al., 2010).
 
 ## **2.4.1 Impactos em Ambientes de Nuvem**
 
-Em ambientes de nuvem, o *overhead* de observabilidade pode se traduzir em maior consumo de recursos faturáveis, como CPU, memória, armazenamento e rede, especialmente quando agentes e serviços de monitoramento competem com a aplicação pelos mesmos recursos (Anders, 2024). Como a cobrança em nuvem costuma seguir modelos baseados em uso, esse aumento de consumo pode elevar o custo operacional, seja por necessidade de maior alocação de memória e processamento, seja por escalonamento adicional para manter o nível de serviço (Google Cloud, 2026; ClickHouse, 2026).  
+Em ambientes de nuvem, o *overhead* de observabilidade pode se traduzir em maior consumo de recursos faturáveis, como CPU, memória, armazenamento e rede, especialmente quando agentes e serviços de monitoramento competem com a aplicação pelos mesmos recursos (Anders, 2024). Como a cobrança em nuvem costuma seguir modelos baseados em uso, esse aumento de consumo pode elevar o custo operacional, seja por necessidade de maior alocação de memória e processamento, seja por escalonamento adicional para manter o nível de serviço (Google Cloud, 2026; ClickHouse, 2022).  
 	Pesquisas recentes com microsserviços indicam que o *tracing* distribuído pode reduzir o *throughput* e aumentar a latência, dependendo da configuração e da carga de trabalho, o que pode exigir mais capacidade computacional para preservar a mesma vazão (Anders, 2024). Em arquiteturas *serverless*, o impacto também pode afetar a escolha de configuração de memória e a duração das execuções, ampliando o faturamento em modelos *pay-as-you-go* (Anders, 2024; Cao et al., 2025).  
-	Dessa forma, medir e controlar o *overhead* de *monitoring* e *tracing* deixa de ser apenas uma preocupação de desempenho e passa a ser também um indicador econômico relevante. Estratégias como *sampling* e restrição da instrumentação a componentes essenciais são exemplos de práticas usadas para reduzir esse custo sem perder capacidade de diagnóstico (Sigelman et al., 2010\)
+	Dessa forma, medir e controlar o *overhead* de *monitoring* e *tracing* deixa de ser apenas uma preocupação de desempenho e passa a ser também um indicador econômico relevante. Estratégias como *sampling* e restrição da instrumentação a componentes essenciais são exemplos de práticas usadas para reduzir esse custo sem perder capacidade de diagnóstico (Sigelman et al., 2010).
 
 **3\. METODOLOGIA**
 
-	Para responder à questão central deste trabalho, que consiste em mensurar o *overhead* gerado pelo algoritmo *Isolation Forest* no *OpenTelemetry Collector*, este estudo caracteriza-se como uma pesquisa experimental e quantitativa com foco na avaliação de desempenho de sistemas computacionais. O método consiste na manipulação controlada do ambiente para observar os efeitos no consumo de recursos da infraestrutura (CPU, memória e latência) diante de uma carga de trabalho simulada.
+	Para responder à questão central, este estudo caracteriza-se como pesquisa experimental e quantitativa com foco na avaliação de desempenho de sistemas computacionais, mensurando o consumo de CPU e de memória do *OpenTelemetry Collector* sob carga controlada, com e sem o processador *Isolation Forest*.
 
 **3.1 Ambiente**
 
-O ambiente experimental será montado utilizando a aplicação de referência OpenTelemetry Demo, que simula um sistema de comércio eletrônico baseado em microsserviços. A telemetria gerada pelos microsserviços será enviada para um OpenTelemetry Collector, componente central da pipeline de observabilidade avaliada.  
-	Os testes serão executados em uma máquina física com a seguinte configuração de hardware: processador Intel Core i5-8700H de 8 núcleos, 16 GB de memória RAM, unidade de armazenamento SSD NVMe de 512 GB e sistema operacional Ubuntu 24.04 LTS. O isolamento dos recursos da aplicação será garantido por meio do uso de contêineres Docker, o que permite limitar a alocação máxima de CPU e memória para a execução da aplicação e do Collector, assegurando a consistência e reprodutibilidade do experimento.
+O ambiente foi montado sobre a aplicação de referência *OpenTelemetry Demo* 3.0.0, que simula um sistema de comércio eletrônico baseado em microsserviços, cuja telemetria é enviada a um *OpenTelemetry Collector*.  
+	Os testes foram executados em uma instância `m6i.xlarge` da Amazon Web Services (região `us-east-1`), provisionada com `CoreCount=2, ThreadsPerCore=1`, o que desabilita o multithreading simultâneo e entrega dois núcleos físicos dedicados — condição para que a contabilização de CPU por contêiner reflita o consumo real do processo medido. A instância dispõe de processador Intel Xeon Platinum 8375C @ 2,90 GHz, 16 GB de RAM, volume EBS gp3 de 100 GB e Ubuntu Server 24.04.4 LTS. O isolamento dos recursos foi garantido por contêineres Docker (Engine 29.8.0, Compose v5.5.1).
 
 **3.2 Ferramentas de Configuração**
 
-Para orquestrar os serviços do ambiente experimental, será utilizado o Docker Compose, ferramenta que permite definir e gerenciar múltiplos contêineres por meio de um arquivo de configuração declarativo. O *OpenTelemetry Demo* será implantado a partir de sua configuração oficial, com modificações pontuais para habilitar ou desabilitar o processador *Isolation Forest* conforme o cenário avaliado.  
-	O processador *Isolation Forest* será implementado como um componente customizado do *OpenTelemetry Collector*, desenvolvido em Go, seguindo a arquitetura de processadores da especificação oficial do *Collector*. Esse processador será responsável por receber os dados de telemetria, calcular escores de anomalia com base em janelas recentes de dados e repassar os dados enriquecidos ao pipeline de exportação.  
-	Para a geração de carga de trabalho, será utilizada a ferramenta Locust, que permite simular requisições simultâneas de usuários ao sistema com configuração precisa de taxa de requisições por segundo (RPS). A carga será mantida constante durante um período contínuo de 30 minutos, permitindo que as métricas de infraestrutura estabilizem e reflitam o comportamento contínuo do sistema, evitando vieses relacionados à fase de inicialização.
+O demo foi implantado a partir de sua configuração oficial da release 3.0.0, orquestrado por Docker Compose. O processador *Isolation Forest* não foi desenvolvido para este trabalho: utilizou-se o componente `isolationforest` distribuído pelo *opentelemetry-collector-contrib* 0.157.0 — versão fixada pela release —, de estabilidade declarada *alpha*. No modo `enrich` adotado, ele calcula escores de anomalia e os grava como atributos no próprio dado, em vez de emitir novas séries, isolando o custo do algoritmo do custo de ampliar o volume exportado. Como já vem compilado na imagem, alternar entre cenários consistiu apenas em trocar o arquivo de configuração do *Collector*. O processador foi acrescentado aos três pipelines — *traces*, métricas e *logs* —, representando adoção plena.  
+	A carga foi gerada pelo k6, integrado à release. Seu script emprega o executor `constant-vus`, que caracteriza carga *fechada*: a saturação do *Collector* se propagaria como contrapressão até os SDKs, reduzindo o volume de telemetria gerado e fazendo o *overhead* medido atenuar-se a si mesmo. Substituiu-se o executor por `constant-arrival-rate`, que impõe a taxa de chegada em vez de negociá-la com o sistema medido. Fixou-se 47 iterações/s com *pool* de 60 usuários virtuais, valor obtido em piloto de calibração cujo critério foi manter o hospedeiro entre 50% e 60% de CPU no *baseline* — folga para que o custo do processador apareça como consumo, e não como enfileiramento. Cada execução durou 40 minutos: os 10 iniciais foram descartados como aquecimento, cobrindo a inicialização dos serviços e o acúmulo do mínimo de amostras exigido pelo processador (`min_samples: 1000`), e os 30 seguintes formaram a janela medida.  
+	Cinco alterações foram aplicadas sobre a release, todas incidindo igualmente nos dois cenários: inclusão do cAdvisor como contêiner de medição; elevação do limite de memória do *Collector* de 400 MB para 1 GB, pois o teto original ficava abaixo do orçamento do próprio processador e faria o `memory_limiter` recusar dados assim que o modelo crescesse, achatando a variável dependente; elevação do limite do Prometheus de 200 MB para 6 GB, para acomodar a raspagem a cada 5 s; desativação do cenário de navegador do k6, que subiria um Chromium *headless* em disputa por CPU; e afrouxamento do *healthcheck* do OpenSearch.
 
 **3.3 Ferramenta de Análise**
 
-O Prometheus será utilizado como ferramenta de coleta e armazenamento de métricas em série temporal, sendo configurado para realizar raspagem (*scrape*) periódica das métricas expostas pelo OpenTelemetry Collector. O Grafana será acoplado ao Prometheus para visualização em tempo real do comportamento dos recursos durante as execuções.  
-	Após a conclusão das baterias de testes, os dados gerados pelo Prometheus serão exportados em formato estruturado (CSV/JSON) para análise estatística. A análise consistirá no cálculo de média, mediana e percentil 99 (P99) de cada métrica em ambos os cenários. O impacto do *Isolation Forest* será calculado por meio da diferença percentual (%) entre os resultados do cenário de teste em relação ao cenário baseline, evidenciando o custo adicional de infraestrutura introduzido pelo algoritmo.  
-	Para cada cenário avaliado, serão realizadas 3 execuções independentes de 30 minutos cada, a fim de garantir a estabilidade estatística dos resultados. O intervalo de confiança adotado para as análises será de 95%.
+O Prometheus armazenou as séries temporais, mas a fonte das medidas não foi o próprio *Collector*, e sim o cAdvisor v0.54.1, em contêiner independente, raspado a cada 5 segundos. A escolha evita uma circularidade: o demo coleta estatísticas de contêineres pelo *receiver* `docker_stats` do próprio *Collector*, de modo que usá-lo como instrumento faria o dado de medição atravessar o sistema medido e, sob saturação, atrasar exatamente nos picos de interesse. O `docker_stats` permaneceu ativo nos dois cenários como fator de controle. O intervalo de 5 s, contra os 60 s adotados pelo demo, garante cerca de 360 amostras por série na janela; o Grafana serviu apenas ao acompanhamento visual.  
+	Foram realizadas 3 execuções independentes por cenário. Os dados foram exportados em CSV para o cálculo de média, mediana e percentil 99 (P99) de cada métrica, e o impacto do *Isolation Forest* é expresso como diferença absoluta e percentual entre teste e *baseline*, com intervalo de confiança de 95% calculado sobre as médias das execuções pela distribuição t de Student com dois graus de liberdade.
 
 **3.4 Cenários e Métricas**
 
-Para realizar uma avaliação relevante do *overhead* computacional introduzido pelo processador *Isolation Forest*, foram definidos 2 cenários que variam a presença do mecanismo de detecção de anomalias na pipeline do *OpenTelemetry Collector*, mantendo todos os demais fatores constantes.  
+Foram definidos 2 cenários que variam a presença do mecanismo de detecção de anomalias, mantendo todos os demais fatores constantes.  
 	Cenários de teste:
 
-| Cenário | Descrição | *Isolation Forest* | Carga (RPS) | Duração |
+| Cenário | Descrição | *Isolation Forest* | Carga | Duração |
 | :---- | :---- | :---- | :---- | :---- |
-| Baseline | Processamento padrão do Collector, sem detecção de anomalias | Desativado | Constante | 30 min |
-| Teste | Processamento com *Isolation Forest* ativo, calculando escores de anomalia em tempo real	 | Ativado | Constante | 30 min |
+| Baseline | Processamento padrão do *Collector*, sem detecção de anomalias | Desativado | 47 it/s · 60 VUs | 10 min descartados \+ 30 min medidos |
+| Teste | Processamento com *Isolation Forest* ativo nos três pipelines, calculando escores de anomalia em tempo real | Ativado | 47 it/s · 60 VUs | 10 min descartados \+ 30 min medidos |
 
-	No cenário *baseline*, o sistema processará o tráfego normalmente, gerando métricas, *logs* e *traces* por meio do *OpenTelemetry Collector*, sem a ativação do processador de anomalias. Esse cenário serve como referência para identificar o comportamento padrão do ambiente. No cenário de teste, o sistema será submetido ao mesmo padrão de carga, com o processador *Isolation Forest* ativado no *Collector*, realizando a análise contínua da telemetria e o cálculo dos escores de anomalia durante a execução. A comparação entre os dois cenários permitirá isolar o impacto computacional introduzido exclusivamente pelo algoritmo.
+	As execuções foram alternadas entre os dois cenários (*baseline*, teste, *baseline*, teste, *baseline*, teste) para diluir eventual deriva térmica ou de vizinhança da instância; a comparação isola o impacto computacional introduzido exclusivamente pelo algoritmo.
 
-	As métricas avaliadas como variáveis dependentes da pesquisa são:
+	As variáveis dependentes, avaliadas por média, mediana e P99 da janela medida, são:
 
-* Consumo de CPU (%): média e picos de utilização do *OpenTelemetry Collector* durante a execução dos testes.  
-* Consumo de memória RAM (MB): quantidade de memória utilizada para manter o funcionamento do algoritmo.  
-* Latência de processamento (ms): tempo adicional introduzido pelo *Collector* no tratamento da telemetria antes de sua exportação final.
+* Consumo de CPU: tempo de CPU do contêiner do *Collector*, expresso como percentual de um núcleo.  
+* Consumo de memória RAM (MB): memória residente (*working set*) do contêiner do *Collector*.
 
-Os fatores de controle mantidos constantes em ambos os cenários são:
+Os fatores de controle mantidos constantes em ambos os cenários foram:
 
-* Hardware e sistema operacional da máquina hospedeira.  
-* Versão do OpenTelemetry Demo e do Collector.  
-* Taxa de requisições por segundo (RPS) gerada pelo Locust.  
-* Limites de CPU e memória definidos nos contêineres Docker.  
-* Configuração do pipeline de exportação do Collector.
+* Hardware, sistema operacional, Docker e versões do *OpenTelemetry Demo* (3.0.0) e do *opentelemetry-collector-contrib* (0.157.0).  
+* Carga do k6: 47 iterações/s e *pool* de 60 usuários virtuais, com o cenário de navegador desativado.  
+* Limites de memória dos contêineres (*Collector* 1 GB; Prometheus 6 GB), pipeline de exportação e presença do cAdvisor e do `docker_stats`.  
+* Hiperparâmetros do `isolationforest`, nos valores padrão do componente (`forest_size: 100`, `subsample_size: 256`, `contamination_rate: 0.1`, `threshold: 0.7`, `min_samples: 1000`, `mode: enrich`, `batch_size: 1000`, `parallel_workers: 4`), com `max_memory_mb: 256` para caber no limite do contêiner.
 
-O fluxo de execução experimental pode ser compreendido conforme ilustrado a seguir:
+	A janela de treinamento e a frequência de atualização do modelo foram os únicos parâmetros deslocados dos padrões, de `24h` e `1h` para `10m` e `5m`. Com os padrões, uma execução de 40 minutos treinaria o modelo uma única vez e a janela capturaria apenas o custo de pontuação, jamais o de reconstrução das árvores — a operação cara do algoritmo. Com `10m` e `5m` ocorrem cerca de cinco retreinos na janela medida. O ajuste é idêntico nos dois cenários, mas implica que uma implantação nos valores padrão incorreria em *overhead* menor que o aqui medido.
+
+	O fluxo de execução experimental pode ser compreendido conforme ilustrado a seguir:
 
 ![][image1]
 
+**FIGURA 1** – Fluxo de execução experimental.  
 Fonte: Gerado usando Gemini
 
 **3.5 Coleta e Análise dos Dados**
 
-Para análise dos dados coletados, será utilizada análise estatística descritiva e comparativa. As métricas exportadas do Prometheus serão processadas para o cálculo de média, mediana e P99 em cada cenário e em cada execução independente. O impacto do *Isolation Forest* será expresso como diferença percentual entre o cenário de teste e o cenário *baseline* em cada uma das métricas observadas, possibilitando a quantificação objetiva do *overhead* introduzido pelo algoritmo na pipeline de observabilidade.
+As variáveis foram extraídas do Prometheus por consultas `query_range` sobre a janela medida, com passo de 5 s: `rate(container_cpu_usage_seconds_total{name="otel-collector"}[1m])`, que devolve o consumo de CPU em núcleos, e `container_memory_working_set_bytes{name="otel-collector"}`, a memória residente em bytes. A exportação precedeu o encerramento de cada cenário, pois a derrubada do ambiente remove os volumes e, com eles, a base de séries do Prometheus.  
+	Registrou-se ainda o tempo de CPU subtraído pelo hipervisor (*steal time*) acumulado pelo hospedeiro no início e ao fim de cada execução; sua variação serve como evidência de que a contenção por vizinhança, própria de instâncias virtuais compartilhadas, não contaminou a medição.
 
 **RESULTADOS/DISCUSSÃO**
 
-	Para os resultados, deverão ser apresentados os dados obtidos, podendo ser expostos em forma de Tabelas e/ou Figuras, desde que apresentados em boa qualidade para a reprodução. Deverão estar inseridos no decorrer do texto e numerados por algarismos arábicos. Para as Tabelas, o título deverá ser inserido acima, e a nota de rodapé abaixo da tabela – contendo as descrições das variáveis e informações da fonte dos dados (Tabela 1); para as Figuras, o título e a fonte deverão ser inseridos abaixo (Figura 1). Evite a apresentação dos mesmos dados em Figuras e Tabelas. Utilize Fonte Times New Roman, tamanho 12, espaçamento 1,5 entre linhas. 
+	As seis execuções produziram 361 amostras por série na janela medida, com exceção de *teste-1*, encerrada 25 segundos antes (356 amostras). O *steal time* acumulado pelo hospedeiro variou entre 0,21 e 0,30 segundo de CPU por execução, contra 4.800 segundos de CPU disponíveis em cada janela — variação que descarta a contenção por vizinhança como fator relevante. A Tabela 1 resume as duas variáveis dependentes.
 
-**TABELA 1** – Título da tabela.
+**TABELA 1** – Consumo de CPU e de memória do *OpenTelemetry Collector* por cenário.
 
-|  | VARIÁVEL 1 | VARIÁVEL 2 |
-| ----- | ----- | ----- |
-| X |  |  |
-| Y |  |  |
+| Métrica | Baseline | Teste | Δ absoluto | Δ % |
+| ----- | ----- | ----- | ----- | ----- |
+| CPU — média (% de 1 núcleo) | 6,97 ± 0,12 | 56,08 ± 2,79 | \+49,11 | \+704 |
+| CPU — mediana (% de 1 núcleo) | 7,01 ± 0,12 | 55,94 ± 4,61 | \+48,93 | \+698 |
+| CPU — P99 (% de 1 núcleo) | 7,33 ± 0,23 | 71,29 ± 1,54 | \+63,96 | \+872 |
+| Memória — média (MB) | 92,34 ± 4,20 | 152,47 ± 122,91 | \+60,13 | \+65 |
+| Memória — mediana (MB) | 93,18 ± 4,39 | 120,22 ± 13,21 | \+27,04 | \+29 |
+| Memória — P99 (MB) | 101,96 ± 4,33 | 378,82 ± 768,42 | \+276,86 | \+272 |
 
-Nota: Descrição das variáveis (Fonte: Autoria própria). Fonte Times New Roman, tamanho 10, centralizado, espaçamento entre linhas simples.
+Nota: média das 3 execuções ± semiamplitude do intervalo de confiança de 95% (distribuição t de Student, 2 graus de liberdade). CPU em percentual de um núcleo físico; memória residente (*working set*) em MB (Fonte: Autoria própria).
 
-![Resultado de imagem para FAGAMMON][image2]  
-**FIGURA 1** – Faculdade Presbiteriana Gammon.  
-Fonte: www.fagammon.edu.br
-
-A discussão deverá ser fundamentada e confrontada com a literatura cientifica apresentada, destacando sua relevância no cenário atual e possíveis limitações.
+	O consumo de CPU é a variável em que o efeito se manifesta com maior clareza e menor dispersão. O *Collector* passou de 6,97% para 56,08% de um núcleo, aumento de 49,11 pontos percentuais — cerca de oito vezes o consumo do *baseline*. A concordância entre execuções é alta nos dois cenários (*baseline* entre 6,92% e 7,02%; teste entre 55,30% e 57,37%) e os intervalos de confiança estão distantes de qualquer sobreposição, de modo que a diferença não é atribuível a variação amostral. O P99 acompanha o mesmo padrão, subindo de 7,33% para 71,29%: mesmo nos picos o processador permanece abaixo da saturação de um núcleo, o que indica custo de processamento efetivo, e não enfileiramento por falta de recurso.  
+	A memória apresenta comportamento distinto e menos conclusivo. A mediana sobe de 93,18 MB para 120,22 MB (\+29%), com intervalos estreitos e sem sobreposição — é a estimativa mais confiável do custo permanente do processador. As demais estatísticas, porém, são dominadas por uma única execução: em *teste-1*, a memória residente cresceu de forma sustentada ao final da janela e atingiu 756,7 MB, contra máximos de 192,5 MB e 232,6 MB nas outras duas. Esse episódio eleva a média do cenário para 152,47 MB e o P99 para 378,82 MB, mas alarga os intervalos de confiança a ponto de torná-los inúteis: o do P99 vai de −389,60 a 1.147,24 MB. Com três execuções por cenário não é possível distinguir se o episódio corresponde a um retreino especialmente custoso, a um acúmulo ainda não estabilizado dentro da janela de 30 minutos ou a um artefato isolado.  
+	Confrontado com a literatura, o custo medido é de outra ordem de grandeza. Anders (2024) relata que a instrumentação com *tracing* distribuído reduz o *throughput* e eleva a latência em faixas relevantes, porém dentro de percentuais de dezenas, e Sigelman et al. (2010) descrevem que, no Dapper, o uso de *sampling* e a restrição da instrumentação a bibliotecas essenciais bastaram para manter o *overhead* em níveis baixos em escala de produção. A diferença de natureza explica a distância: nos dois casos citados o custo é o de coletar e exportar telemetria, ao passo que aqui se executa um algoritmo de aprendizado não supervisionado sobre todo o fluxo processado — o consumo do *Collector* octuplica, em vez de crescer algumas dezenas de pontos percentuais.  
+	A leitura de viabilidade depende do referencial adotado. Em termos absolutos, 56% de um núcleo em uma máquina de dois equivalem a cerca de 28% da capacidade do hospedeiro, carga que uma instância modesta absorve sem dificuldade. Em termos relativos, o mesmo número significa que manter a detecção de anomalias na pipeline custa oito vezes o preço de operar o *Collector* — o que, sob o modelo *pay-as-you-go* discutido na seção 2.4.1 (Armbrust et al., 2009), se traduz diretamente em fatura. Duas ressalvas atenuam o número: a janela de treinamento de 10 minutos, adotada para que o custo de retreino coubesse na janela medida (seção 3.4), é mais agressiva que o padrão de 24 horas do componente; e o processador foi habilitado nos três pipelines simultaneamente, configuração de adoção plena. Uma implantação seletiva — restrita a *traces* e com os intervalos padrão — incorreria em custo menor, ainda que não quantificado neste trabalho.
 
 **CONCLUSÃO**
 
-	Esta seção corresponde ao fechamento do trabalho, portanto, deverá evidenciar, com clareza, os resultados encontrados e apontados ao longo da discussão, bem como responder aos objetivos enunciados na introdução deste trabalho. Fonte Times New Roman, tamanho 12, espaçamento 1,5 entre linhas
-
-**AGRADECIMENTOS**
-
-	Item opcional, destinado a informar agências financiadoras, instituições apoiadoras e colaboradores. Fonte Times New Roman, tamanho 12, espaçamento 1,5 entre linhas.
+	Os três objetivos específicos foram cumpridos: a aplicação de referência *OpenTelemetry Demo* 3.0.0 foi configurada e instrumentada sobre infraestrutura controlada; seis execuções de carga constante foram conduzidas, alternando os cenários com e sem a atuação do processador de anomalias; e o consumo de CPU e de memória do *Collector* foi medido por instrumento externo à pipeline avaliada.  
+	Quanto à questão central, o *overhead* não compromete a viabilidade de adoção em termos absolutos, mas altera de forma substantiva o custo de operação. O processador elevou o consumo de CPU do *Collector* de 6,97% para 56,08% de um núcleo — cerca de oito vezes — e a mediana de memória residente de 93,18 MB para 120,22 MB. Em uma máquina de dois núcleos, esse consumo corresponde a aproximadamente 28% da capacidade do hospedeiro, patamar que não inviabiliza a operação e se acomoda com folga na configuração avaliada. O custo relativo, entretanto, é elevado o bastante para que manter a detecção de anomalias na pipeline deixe de ser uma decisão trivial em ambientes cobrados por uso, sobretudo quando o processador é habilitado nos três pipelines simultaneamente, como neste experimento.  
+	Duas limitações restringem o alcance dessas conclusões. A primeira é o número de execuções: com três por cenário, o intervalo de confiança é estreito o suficiente para sustentar o resultado de CPU, mas não o de memória, cuja média e percentil 99 foram determinados por uma única execução em que o consumo cresceu de forma sustentada até 756,7 MB — comportamento que não se repetiu nas demais e permanece sem explicação. A segunda é a janela de treinamento adotada, de 10 minutos contra o padrão de 24 horas do componente, escolhida para que o custo de retreino coubesse na janela de medição; ela torna o resultado uma estimativa superior do *overhead* esperado em operação com os parâmetros de fábrica. Trabalhos futuros devem ampliar o número de execuções, estender a janela de medição até a estabilização da memória e comparar configurações seletivas — habilitando o processador em um único pipeline — para determinar em que ponto o custo se torna proporcional ao benefício de detecção.
 
 **REFERÊNCIAS**
 
 AGYEMANG, E. F. *Anomaly detection using unsupervised machine learning algorithms: a simulation study*. Scientific African, v. 26, e02386, 2024\. DOI: https://doi.org/10.1016/j.sciaf.2024.e02386.
 
 AMARAL JÚNIOR, Odravison. *Arquitetura de microsserviços: uma comparação com sistemas monolíticos*. 2017\. Trabalho de Conclusão de Curso (Bacharelado em Sistemas de Informação) — Universidade Federal da Paraíba, João Pessoa, 2017\. Disponível em: https://repositorio.ufpb.br/jspui/bitstream/123456789/3235/1/OAJ14062017.pdf. Acesso em: 16 maio 2026\.
+
+AMAZON WEB SERVICES. *Amazon EC2 M6i instances*. \[S. l.\], 2026\. Disponível em: https://aws.amazon.com/ec2/instance-types/m6i/. Acesso em: 10 set. 2026\.
 
 ANDERS. *Investigating performance overhead of distributed tracing in microservices and serverless applications*. 2024\. Disponível em: https://atlarge-research.com/pdfs/2024-msc-anders\_tracing\_overhead.pdf. Acesso em: 16 maio 2026\.
 
@@ -167,9 +171,15 @@ CHEN, J. et al. An anomaly detection method for wireless sensor networks based o
 
 CLICKHOUSE. *ClickHouse pricing*. 2022\. Disponível em: https://clickhouse.com/pricing. Acesso em: 16 maio 2026\.
 
+DOCKER INC. *Docker Compose overview*. \[S. l.\], 2026\. Disponível em: https://docs.docker.com/compose/. Acesso em: 10 set. 2026\.
+
 DUGGIRALA, Sanghamithra; KUMAR, Munich. Observability in microservices: advanced monitoring and troubleshooting techniques. *Journal of Quantum Science and Technology*, v. 2, n. 2, 2025\.
 
 FOWLER, Martin; LEWIS, James. *Microservices*. 2014\. Disponível em: https://martinfowler.com/articles/microservices.html. Acesso em: 16 maio 2026\.
+
+GOOGLE. *cAdvisor: analyzes resource usage and performance characteristics of running containers*. \[S. l.\], 2026\. Disponível em: https://github.com/google/cadvisor. Acesso em: 10 set. 2026\.
+
+GRAFANA LABS. *k6 documentation*. \[S. l.\], 2026\. Disponível em: https://grafana.com/docs/k6/latest/. Acesso em: 10 set. 2026\.
 
 HALLUR, J. From monitoring to observability: enhancing system reliability and team productivity. *International Journal of Science and Research*, v. 13, n. 10, out. 2024\.
 
@@ -189,9 +199,15 @@ MAHIDA, A. *Enhancing observability in distributed systems: a comprehensive revi
 
 OPENTELEMETRY. *OpenTelemetry*. \[S. l.\], s.d. Disponível em: https://opentelemetry.io. Acesso em: 16 maio 2026\.
 
+OPENTELEMETRY. *OpenTelemetry Collector Contrib: isolationforestprocessor*, versão 0.157.0. \[S. l.\], 2026\. Disponível em: https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/processor/isolationforestprocessor. Acesso em: 10 set. 2026\.
+
+OPENTELEMETRY. *OpenTelemetry Demo*, versão 3.0.0. \[S. l.\], 2026\. Disponível em: https://github.com/open-telemetry/opentelemetry-demo. Acesso em: 10 set. 2026\.
+
 PENTAPARTHI, S. K. R. Observability for AI-enabled cloud-native networks: a unified framework integrating OpenTelemetry, CortexDB, Loki, GenAI, and RAG. *International Journal of Scientific Research in Computer Science, Engineering and Information Technology*, v. 11, n. 2, p. 3142–3150, abr. 2025\. DOI: https://doi.org/10.32628/CSEIT25112811.
 
 POTHARAJU, S. et al. A two-step machine learning approach for predictive maintenance and anomaly detection in environmental sensor systems. *MethodsX*, v. 14, p. 103181, 2025\. DOI: https://doi.org/10.1016/j.mex.2025.103181.
+
+PROMETHEUS. *Prometheus documentation*. \[S. l.\], 2026\. Disponível em: https://prometheus.io/docs/. Acesso em: 10 set. 2026\.
 
 SIGELMAN, Benjamin H. et al. *Dapper, a large-scale distributed systems tracing infrastructure*. Google, 2010\. Disponível em: http://research.google.com/pubs/pub36356.html. Acesso em: 16 maio 2026\.
 

@@ -12,7 +12,7 @@ Compara dois cenários com todos os outros fatores constantes:
 | `teste` | `isolationforest` acrescentado aos 3 pipelines (traces, metrics, logs) |
 
 Saída: CSV de CPU e memória do container `otel-collector`, exportados do
-Prometheus, 3 execuções por cenário.
+Prometheus, 5 execuções por cenário (10 no total).
 
 Este README é o passo a passo operacional completo — do zero até os dados na
 sua máquina. Cada escolha não-óbvia está justificada no ponto em que aparece.
@@ -27,8 +27,8 @@ sua máquina. Cada escolha não-óbvia está justificada no ponto em que aparece
 - [Parte 3 — Preparar o sistema operacional](#parte-3--preparar-o-sistema-operacional)
 - [Parte 4 — Enviar o experimento para a VM](#parte-4--enviar-o-experimento-para-a-vm)
 - [Parte 5 — Validar e smoke test](#parte-5--validar-e-smoke-test)
-- [Parte 6 — Piloto de calibração](#parte-6--piloto-de-calibração)
-- [Parte 7 — As seis execuções medidas](#parte-7--as-seis-execuções-medidas)
+- [Parte 6 — Confirmar a calibração](#parte-6--confirmar-a-calibração)
+- [Parte 7 — As dez execuções medidas](#parte-7--as-dez-execuções-medidas)
 - [Parte 8 — Trazer os dados e desligar](#parte-8--trazer-os-dados-e-desligar)
 - [Referência rápida](#referência-rápida)
 - [Armadilhas conhecidas](#armadilhas-conhecidas)
@@ -57,10 +57,19 @@ padrão de conta nova; `c6i.2xlarge` (8 vCPU) exigiria pedido de aumento de cota
 |---|---|
 | Provisionar + preparar SO + Docker | ~40 min |
 | Validação + smoke test | ~40 min |
-| Piloto de calibração | ~1 h 30 |
-| 6 execuções (3 por cenário × ~50 min) | ~5 h |
+| Confirmar a calibração | ~50 min |
+| 10 execuções (5 por cenário × ~50 min) | ~8 h 20 |
 | Folga para re-execuções | ~2 h |
-| **Total** | **~10 h ≈ US$ 1,90** |
+| **Total** | **~13 h ≈ US$ 2,50** |
+
+> **Por que 5 execuções por cenário e não 3.** Com n=3 o intervalo de
+> confiança de 95% usa t de Student com 2 graus de liberdade (t=4,303); com
+> n=5 são 4 g.l. (t=2,776). Como a semiamplitude é t·s/√n, o fator cai de
+> 2,48 para 1,24 — o intervalo encolhe exatamente pela metade. Mais
+> importante: na primeira sessão *uma* das três execuções do cenário `teste`
+> teve a memória crescendo até 756 MB enquanto as outras duas ficaram abaixo
+> de 235 MB. Um em três não permite dizer se é episódio ou padrão; um em
+> cinco, ou dois em cinco, permite.
 
 > **Pare a instância entre as sessões.** O EBS continua cobrando ~US$ 8/mês
 > pelos 100 GB (irrelevante); a instância ligada, não.
@@ -180,8 +189,10 @@ a taxa de chegada:
  LOAD_GENERATOR_VUS=5
 +
 +# Taxa de chegada imposta ao k6, em iteracoes/s (executor constant-arrival-rate).
-+# Definir no piloto de calibracao.
-+LOAD_GENERATOR_RPS=15
++# 47 veio do piloto de calibracao (host entre 50% e 60% de CPU no baseline).
++# Deixe o valor calibrado AQUI, e nao um placeholder: se o RPS= for esquecido
++# na linha de comando, a execucao roda com este numero — e roda certo.
++LOAD_GENERATOR_RPS=47
  K6_TARGET_URL=http://${FRONTEND_PROXY_ADDR}
 ```
 
@@ -225,12 +236,12 @@ experimento/configs/prometheus-config.template.yaml
 ```
 
 Integridade dos arquivos **operativos** — os que afetam o resultado da medição
-(primeiros 16 caracteres do SHA-256, estado de 01/09/2026):
+(primeiros 16 caracteres do SHA-256, estado de 10/09/2026):
 
 ```
-93d4bd0b599d4fd3  cenario.sh
-9786ccb4fa9bb575  compose.extras.yaml
-605bf3ef1cd6d4a4  experimento/coletar.sh
+ff801af5bd9ba0b8  cenario.sh
+04349d28f282a8fc  compose.extras.yaml
+bd9f604e2cd2aea8  experimento/coletar.sh
 39a324ce40c707d8  experimento/k6/gerar-script.py
 7179da677d4e32c0  experimento/configs/otelcol-config-extras.BASELINE.yml
 5c52916d8a123c20  experimento/configs/otelcol-config-extras.TESTE.yml
@@ -446,7 +457,7 @@ Se aparecerem 4 vCPUs, o `--cpu-options` não pegou — relance a instância.
 
 > **Não é burocracia.** O Ubuntu vem com atualização automática ligada. Um
 > `apt` disparando no meio de uma janela de 30 min queima CPU e contamina
-> *uma* das seis execuções, de forma invisível, criando um outlier que você
+> *uma* das dez execuções, de forma invisível, criando um outlier que você
 > não saberia explicar.
 
 ```bash
@@ -575,10 +586,11 @@ docker logs load-generator 2>&1 | grep -i dropped_iterations
 curl -s localhost:9090/api/v1/label/__name__/values | tr ',' '\n' | grep otelcol_
 ```
 
-> A verificação (e) resolve uma pendência aberta: CPU e memória vêm do
-> cAdvisor, mas o Collector **não** expõe um "tempo dentro do processador".
-> Use esta listagem para escolher a definição operacional de latência antes da
-> primeira execução medida.
+> A verificação (e) já cumpriu seu papel e a pendência está **encerrada**: o
+> Collector não expõe nada equivalente a "tempo dentro do processador", e por
+> isso a latência foi **retirada** das variáveis dependentes do TCC. Restaram
+> CPU e memória, ambas vindas do cAdvisor. A listagem fica como registro da
+> decisão.
 
 ### A verificação que decide tudo
 
@@ -597,18 +609,22 @@ espere mais.
 
 ---
 
-## Parte 6 — Piloto de calibração
+## Parte 6 — Confirmar a calibração
 
-Objetivo: achar o `RPS` que deixa o **host** em 50–60% de CPU no cenário baseline.
+O valor já é conhecido: **`RPS=47`, `VUS=60`**, achado no piloto da primeira
+sessão. Esta parte não procura mais o número — ela **confirma** que ele ainda
+deixa o host em 50–60% de CPU no baseline e, principalmente, **registra a
+medida**. Na primeira sessão o número não foi anotado, e por isso o TCC afirma
+o critério sem poder citar o valor observado.
 
 > **O alvo é o host, não o Collector.** A razão é deixar folga para o Isolation
 > Forest consumir CPU: se a máquina já estiver saturada, o custo do processador
 > não aparece como delta de CPU — vira enfileiramento e latência, e a atribuição
-> causal se perde. Um Collector a 55% de *um* núcleo, numa máquina de 4, não
+> causal se perde. Um Collector a 55% de *um* núcleo, numa máquina de 2, não
 > diria nada sobre saturação.
 
 ```bash
-RPS=40 VUS=60 ./cenario.sh baseline
+RPS=47 VUS=60 ./cenario.sh baseline
 ```
 
 Espere ~12 min e observe as duas séries. O host primeiro:
@@ -632,29 +648,48 @@ curl -sG http://localhost:9090/api/v1/query --data-urlencode \
   'query=rate(container_cpu_usage_seconds_total{name="otel-collector"}[1m])*100'
 ```
 
-Ajuste o `RPS` e repita até o host estabilizar entre **0,50 e 0,60**. Registre
-os dois números — o do host justifica o critério, o do Collector é a linha de
-base da variável dependente.
+Se o host ficar entre **0,50 e 0,60**, está confirmado. Se sair da faixa (a
+AMI ou as imagens do demo podem ter mudado), ajuste o `RPS` e repita até
+entrar — e então use o valor novo em **todas** as dez execuções, corrigindo o
+número no texto do TCC.
 
 Confira também que `dropped_iterations` continua em zero: se o k6 não estiver
 entregando a taxa pedida, o RPS calibrado é fictício. Se cair, aumente `VUS`.
+
+**Anote os três números num arquivo** — eles vão para o texto:
+
+```bash
+{
+  echo "RPS=47 VUS=60"
+  echo -n "host_cpu="; curl -sG http://localhost:9090/api/v1/query \
+    --data-urlencode 'query=sum(rate(container_cpu_usage_seconds_total{id="/"}[1m])) / scalar(machine_cpu_cores)'
+  echo; echo -n "collector_cpu="; curl -sG http://localhost:9090/api/v1/query \
+    --data-urlencode 'query=rate(container_cpu_usage_seconds_total{name="otel-collector"}[1m])*100'
+  echo; docker logs load-generator 2>&1 | grep -i dropped_iterations | tail -1
+} > ~/calibracao.txt
+```
 
 Fixado o valor, **ele vira fator de controle**: não muda mais entre execuções.
 
 ---
 
-## Parte 7 — As seis execuções medidas
+## Parte 7 — As dez execuções medidas
 
-Alternando os cenários, para diluir deriva térmica ou de vizinhança:
+Cinco por cenário, alternando, para diluir deriva térmica ou de vizinhança:
 
 ```
-baseline → teste → baseline → teste → baseline → teste
+baseline → teste → baseline → teste → baseline →
+teste → baseline → teste → baseline → teste
 ```
 
-Para cada uma, com o `RPS` e o `VUS` do piloto:
+São ~8 h 20 no total. Dá para partir em duas sessões, parando a instância
+entre elas (Parte 8) — desde que cada sessão termine com um par completo, para
+que a alternância não fique enviesada por uma pausa no meio.
+
+Para cada execução:
 
 ```bash
-RPS=<piloto> VUS=<piloto> ./cenario.sh baseline   # ou teste
+RPS=47 VUS=60 ./cenario.sh baseline   # ou teste
 
 # O script imprime a janela. São 40 min: 10 de aquecimento (descartados)
 # + 30 de medição. Espere.
@@ -663,14 +698,45 @@ RPS=<piloto> VUS=<piloto> ./cenario.sh baseline   # ou teste
 ./cenario.sh parar
 ```
 
+O `coletar.sh` grava três CSV — `.cpu.csv`, `.memoria.csv` e `.host.csv` — e
+anexa ao registro da execução, automaticamente, as evidências que o texto do TCC
+cita:
+
+| Campo no registro | O que prova |
+|---|---|
+| `RPS_EFETIVO` | a taxa que o contêiner realmente recebeu (escrito pelo `cenario.sh`) |
+| `DROPPED_ITERATIONS` | que o k6 entregou a carga pedida |
+| `HOST_CPU` (série `.host.csv`) | o critério de calibração dos 50–60% |
+| `ISOLATION_SCORE` | que o processador atuou, e não apenas carregou |
+| `STEAL_DELTA_TICKS` | que a vizinhança da VM não contaminou a janela |
+
+> **`RPS_EFETIVO` é verificado na subida.** O `cenario.sh` compara o valor lido
+> do contêiner com o do arquivo e **aborta** se divergirem — o modo de falha da
+> sessão de 07/09, em que 40 min de medição poderiam sair com a carga errada
+> sem nenhum sinal, deixa de ser possível.
+
+> **Se `ISOLATION_SCORE=nao-verificado`**, a coleta não falha: confira à mão no
+> Jaeger (`localhost:8080/jaeger/ui`) **antes** de `./cenario.sh parar`, porque
+> depois disso os dados somem junto com os volumes.
+
 > **`coletar.sh` ANTES de `parar`.** O `make stop` remove os volumes, e o TSDB
 > do Prometheus vai junto. Coletar depois é perder a execução.
 
-O `coletar.sh` grava os CSV (`.cpu.csv` e `.memoria.csv`), imprime
-média/mediana/P99 e anexa o delta de `steal time` ao arquivo da execução.
-
 **Confira o steal a cada rodada**: se subir de forma perceptível, a VM teve
-contenção de vizinhança e aquela execução precisa ser refeita.
+contenção de vizinhança e aquela execução precisa ser refeita. Referência da
+primeira sessão: 21 a 30 *ticks* (0,21 a 0,30 s de CPU) por janela de 40 min,
+contra 4.800 s de CPU disponíveis — desprezível. Uma ordem de grandeza acima
+disso já merece refazer.
+
+**Confira também a memória do Collector ao fim de cada execução do cenário
+`teste`.** Se o valor final estiver claramente acima do início da janela, o
+consumo ainda não estabilizou em 30 min e a janela precisa ser estendida —
+foi o que aconteceu numa das execuções da primeira sessão:
+
+```bash
+curl -sG http://localhost:9090/api/v1/query --data-urlencode \
+  'query=container_memory_working_set_bytes{name="otel-collector"}/1048576'
+```
 
 ---
 
@@ -778,7 +844,7 @@ espelham exatamente onde cada arquivo entra na release.
 | Arquivo | Papel |
 |---|---|
 | `cenario.sh` | Sobe, valida ou derruba um cenário. Gera os arquivos derivados |
-| `compose.extras.yaml` | Overlay idêntico nos dois cenários: cAdvisor, limites de memória do Collector (1 GB) e do Prometheus (1 GB), `K6_BROWSER_ENABLED=false`, healthcheck do OpenSearch afrouxado (`start_period` 120 s / `retries` 20) para a 1ª subida |
+| `compose.extras.yaml` | Overlay idêntico nos dois cenários: cAdvisor, limites de memória do Collector (1 GB) e do Prometheus (6 GB), `K6_BROWSER_ENABLED=false`, healthcheck do OpenSearch afrouxado (`start_period` 120 s / `retries` 20) para a 1ª subida |
 | `configs/otelcol-config-extras.BASELINE.yml` | Só comentários — Collector upstream intocado |
 | `configs/otelcol-config-extras.TESTE.yml` | `isolationforest` nos 3 pipelines. **Único delta entre os cenários** |
 | `configs/prometheus-config.template.yaml` | Config do Prometheus + job do cAdvisor, com `__CENARIO__` |
