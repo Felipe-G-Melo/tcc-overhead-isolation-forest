@@ -24,9 +24,9 @@ fi
 
 PROM="http://localhost:9090"
 BASE="${REGISTRO%.env}"
-# `step` casado com o scrape_interval de 5s do job cadvisor: nao inventa
+# `step` casado com o scrape_interval de 75s do job cadvisor: nao inventa
 # resolucao que o dado nao tem, nem descarta amostras coletadas.
-STEP=5s
+STEP=75s
 
 consultar() {
   local nome="$1" query="$2"
@@ -52,7 +52,14 @@ for ts,v in r[0]["values"]:
 }
 
 # CPU do Collector, em nucleos. Multiplicar por 100 da % de um nucleo.
-consultar cpu    'rate(container_cpu_usage_seconds_total{name="otel-collector"}[1m])'
+#
+# irate e nao rate: irate usa so as duas ultimas amostras, entao cada ponto e a
+# CPU media no ultimo intervalo de raspagem (75s). Com step=75s os intervalos
+# ficam lado a lado, sem sobreposicao, e juntos cobrem a janela inteira. O [3m]
+# so define onde procurar as duas amostras — tolera uma raspagem perdida.
+# `rate(...[1m])` com scrape de 75s nao teria duas amostras na janela e
+# voltaria vazio, sem erro.
+consultar cpu    'irate(container_cpu_usage_seconds_total{name="otel-collector"}[3m])'
 # Memoria residente do Collector, em bytes.
 consultar memoria 'container_memory_working_set_bytes{name="otel-collector"}'
 # CPU do HOST, em fracao da maquina. E o criterio da calibracao (50-60%) que o
@@ -60,7 +67,7 @@ consultar memoria 'container_memory_working_set_bytes{name="otel-collector"}'
 # O scalar() no denominador nao e cosmetico: o cAdvisor anexa boot_id,
 # machine_id e system_uuid as metricas machine_*, e a divisao vetor-a-vetor do
 # PromQL so casa series de labels identicos, devolvendo vazio SEM erro.
-consultar host   'sum(rate(container_cpu_usage_seconds_total{id="/"}[1m])) / scalar(machine_cpu_cores)'
+consultar host   'sum(irate(container_cpu_usage_seconds_total{id="/"}[3m])) / scalar(machine_cpu_cores)'
 
 # ---------------------------------------------------------------------------
 # Evidencias de validade da execucao, anexadas ao registro.
@@ -127,8 +134,8 @@ for nome, fator, unidade in (("cpu", 100.0, "% de 1 nucleo"),
     if not vals:
         continue
     n = len(vals)
-    # P99 por indice em amostra ordenada; com ~360 pontos e resolucao suficiente.
-    p99 = vals[min(n - 1, int(round(0.99 * (n - 1))))]
+    # Maximo, e nao P99: com ~25 pontos o P99 por indice cai no ultimo
+    # elemento — chamar de P99 seria dar um nome falso ao maximo.
     print(f"{nome:8} n={n:4}  media={statistics.fmean(vals):9.2f}  "
-          f"mediana={statistics.median(vals):9.2f}  p99={p99:9.2f}  ({unidade})")
+          f"mediana={statistics.median(vals):9.2f}  max={vals[-1]:9.2f}  ({unidade})")
 PY
