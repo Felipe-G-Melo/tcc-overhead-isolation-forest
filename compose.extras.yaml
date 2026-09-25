@@ -28,13 +28,18 @@ services:
     privileged: true
     restart: unless-stopped
     command:
-      # Alinhado ao scrape_interval de 5s do job cadvisor: amostrar mais rapido
-      # que o scrape so gastaria CPU sem melhorar a resolucao do dado.
+      # Leitura do SO a cada 5s, MAIS RAPIDA que o scrape de 75s de proposito.
+      # O Prometheus recebe a ultima leitura guardada, nao uma feita na hora:
+      # a 5s ela tem no maximo 5s de idade. Com os dois ciclos em 75s, nao
+      # sincronizados, uma raspagem podia reler a mesma leitura — ponto de CPU
+      # zero seguido de um ponto dobrado. O custo extra e igual nos dois
+      # cenarios (fator de controle) e so aparece na CPU do host.
       - --housekeeping_interval=5s
       # Sem estas duas flags o cAdvisor emite dezenas de milhares de series
-      # (uma por CPU, por interface, por processo). Com scrape de 5s isso
-      # estoura o limite de memoria do Prometheus no meio da execucao — e uma
-      # execucao interrompida e uma execucao perdida.
+      # (uma por CPU, por interface, por processo). Com o scrape de 5s das
+      # sessoes anteriores isso estourava o limite de memoria do Prometheus
+      # no meio da execucao — e uma execucao interrompida e uma execucao
+      # perdida.
       - --docker_only=true
       - --disable_metrics=percpu,sched,tcp,udp,advtcp,process,hugetlb,referenced_memory,cpu_topology,resctrl,cpuset,memory_numa
       - --store_container_labels=false
@@ -104,6 +109,10 @@ services:
           # Elevado para 6 GB nos DOIS cenarios. O Prometheus e instrumento,
           # nao o objeto medido — este teto nao introduz delta entre baseline
           # e teste.
+          #
+          # (O historico acima e do scrape de 5s. Com 75s o Prometheus guarda
+          # 15x menos amostras do cAdvisor; o teto fica em 6 GB por seguranca,
+          # ja que folga no instrumento nao afeta a medicao.)
           memory: 6G
 
   # ---------------------------------------------------------------------------

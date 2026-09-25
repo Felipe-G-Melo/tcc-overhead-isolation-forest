@@ -72,11 +72,15 @@ storage:
 # lados), mas nao e a fonte de medicao.
 scrape_configs:
   - job_name: cadvisor
-    # O `scrape_interval` global e 60s — alinhado ao intervalo de export dos
-    # SDKs. Para a medicao isso e grosso demais: 30 min renderiam ~30 amostras
-    # por serie e `rate(...[1m])` nao teria dois pontos dentro da janela.
-    # 5s da ~360 amostras por serie na janela medida.
-    scrape_interval: 5s
+    # 75s: cada amostra de CPU e a media de um intervalo de 75s, sem
+    # sobreposicao com o vizinho (ver irate em coletar.sh), e a memoria e a
+    # leitura daquele instante. 30 min de medicao dao 25 pontos por serie.
+    #
+    # O cAdvisor continua lendo o SO a cada 5s (compose.extras.yaml): cada
+    # raspagem encontra um dado de no maximo 5s de idade. Com os dois ciclos
+    # em 75s, nao sincronizados, uma raspagem podia reler a mesma leitura —
+    # ponto de CPU zero seguido de um ponto dobrado.
+    scrape_interval: 75s
     scrape_timeout: 4s
     static_configs:
       - targets: ['cadvisor:8080']

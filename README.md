@@ -236,16 +236,16 @@ experimento/configs/prometheus-config.template.yaml
 ```
 
 Integridade dos arquivos **operativos** — os que afetam o resultado da medição
-(primeiros 16 caracteres do SHA-256, estado de 10/09/2026):
+(primeiros 16 caracteres do SHA-256, estado de 25/09/2026):
 
 ```
 ff801af5bd9ba0b8  cenario.sh
-04349d28f282a8fc  compose.extras.yaml
-bd9f604e2cd2aea8  experimento/coletar.sh
+1be9695ded02083d  compose.extras.yaml
+73c2cae378b11b71  experimento/coletar.sh
 39a324ce40c707d8  experimento/k6/gerar-script.py
 7179da677d4e32c0  experimento/configs/otelcol-config-extras.BASELINE.yml
 5c52916d8a123c20  experimento/configs/otelcol-config-extras.TESTE.yml
-3a931bc7d587822b  experimento/configs/prometheus-config.template.yaml
+f54b2a14f5f206df  experimento/configs/prometheus-config.template.yaml
 ```
 
 Verificar os sete de uma vez:
@@ -577,7 +577,7 @@ curl -s localhost:9090/api/v1/targets | grep -o '"health":"[a-z]*"'
 
 # c) a consulta de CPU do Collector retorna dado (esperar ~3 min)
 curl -sG http://localhost:9090/api/v1/query \
-  --data-urlencode 'query=rate(container_cpu_usage_seconds_total{name="otel-collector"}[1m])*100'
+  --data-urlencode 'query=irate(container_cpu_usage_seconds_total{name="otel-collector"}[3m])*100'
 
 # d) a carga está sendo entregue — deve ficar em zero
 docker logs load-generator 2>&1 | grep -i dropped_iterations
@@ -631,7 +631,7 @@ Espere ~12 min e observe as duas séries. O host primeiro:
 
 ```bash
 curl -sG http://localhost:9090/api/v1/query --data-urlencode \
-  'query=sum(rate(container_cpu_usage_seconds_total{id="/"}[1m])) / scalar(machine_cpu_cores)'
+  'query=sum(irate(container_cpu_usage_seconds_total{id="/"}[3m])) / scalar(machine_cpu_cores)'
 ```
 
 O `scalar(...)` no denominador não é cosmético: o cAdvisor v0.54.1 anexa
@@ -645,7 +645,7 @@ E o Collector:
 
 ```bash
 curl -sG http://localhost:9090/api/v1/query --data-urlencode \
-  'query=rate(container_cpu_usage_seconds_total{name="otel-collector"}[1m])*100'
+  'query=irate(container_cpu_usage_seconds_total{name="otel-collector"}[3m])*100'
 ```
 
 Se o host ficar entre **0,50 e 0,60**, está confirmado. Se sair da faixa (a
@@ -662,9 +662,9 @@ entregando a taxa pedida, o RPS calibrado é fictício. Se cair, aumente `VUS`.
 {
   echo "RPS=47 VUS=60"
   echo -n "host_cpu="; curl -sG http://localhost:9090/api/v1/query \
-    --data-urlencode 'query=sum(rate(container_cpu_usage_seconds_total{id="/"}[1m])) / scalar(machine_cpu_cores)'
+    --data-urlencode 'query=sum(irate(container_cpu_usage_seconds_total{id="/"}[3m])) / scalar(machine_cpu_cores)'
   echo; echo -n "collector_cpu="; curl -sG http://localhost:9090/api/v1/query \
-    --data-urlencode 'query=rate(container_cpu_usage_seconds_total{name="otel-collector"}[1m])*100'
+    --data-urlencode 'query=irate(container_cpu_usage_seconds_total{name="otel-collector"}[3m])*100'
   echo; docker logs load-generator 2>&1 | grep -i dropped_iterations | tail -1
 } > ~/calibracao.txt
 ```
@@ -801,7 +801,7 @@ As seis primeiras são do próprio demo; as quatro últimas são de ambiente.
 |---|---|---|
 | 1 | k6 com carga fechada (`constant-vus` + `sleep`) | **Nenhuma.** O overhead se auto-atenua silenciosamente |
 | 2 | `LOAD_GENERATOR_VUS` do `.env` é ignorado | A carga não muda por mais que você edite o `.env` |
-| 3 | `scrape_interval` global de 60 s | `rate(...[1m])` volta vazio ou serrilhado |
+| 3 | Janela do `rate` menor que duas raspagens (global 60 s; job do cAdvisor 75 s) | `rate(...[1m])` volta vazio, sem erro. As consultas de CPU usam `irate(...[3m])` |
 | 4 | Collector limitado a 400 MB, contra `max_memory_mb: 512` | Delta de memória achatado, lido como "sem overhead" |
 | 5 | Chromium headless ligado por padrão | Ruído de dezenas de pontos percentuais na CPU |
 | 6 | Healthcheck do OpenSearch curto para a 1ª subida (`start_period` 10 s + 10×5 s) | `dependency failed to start: container opensearch is unhealthy` — a stack inteira não sobe. `compose.extras.yaml` afrouxa para `start_period` 120 s / `retries` 20 |
@@ -849,7 +849,7 @@ espelham exatamente onde cada arquivo entra na release.
 | `configs/otelcol-config-extras.TESTE.yml` | `isolationforest` nos 3 pipelines. **Único delta entre os cenários** |
 | `configs/prometheus-config.template.yaml` | Config do Prometheus + job do cAdvisor, com `__CENARIO__` |
 | `k6/gerar-script.py` | Troca o executor do script upstream e remove o `sleep`. Aborta se o trecho não bater |
-| `coletar.sh` | Exporta a janela medida para CSV e imprime média/mediana/P99 |
+| `coletar.sh` | Exporta a janela medida para CSV (um ponto a cada 75 s) e imprime média/mediana/máximo |
 
 **Gerados em tempo de execução** (não versionados, não editar):
 `.env.override`, `experimento/configs/prometheus-config.generated.yaml`,
